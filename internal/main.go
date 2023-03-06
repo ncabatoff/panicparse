@@ -18,6 +18,7 @@ package internal
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -124,17 +125,44 @@ func toHTML(h toHTMLer, p string, needsEnv bool) error {
 	return err
 }
 
-func processInner(out io.Writer, p *Palette, s stack.Similarity, pf pathFormat, html string, filter, match *regexp.Regexp, c *stack.Snapshot, first bool) error {
+func toJSON(a *stack.Aggregated, p string) error {
+	f, err := os.Create(p)
+	if err != nil {
+		return err
+	}
+	j := json.NewEncoder(f)
+	err = j.Encode(a)
+	if err2 := f.Close(); err == nil {
+		err = err2
+	}
+	return err
+}
+
+func fromJSON(r io.Reader) (*stack.Aggregated, error) {
+	j := json.NewDecoder(r)
+	var a stack.Aggregated
+	err := j.Decode(&a)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func processInner(out io.Writer, p *Palette, s stack.Similarity, pf pathFormat, html, json string, filter, match *regexp.Regexp, c *stack.Snapshot, first bool) error {
 	log.Printf("GOROOT=%s", c.RemoteGOROOT)
 	log.Printf("GOPATH=%s", c.RemoteGOPATHs)
 	needsEnv := len(c.Goroutines) == 1 && showBanner()
 	// Bucketing should only be done if no data race was detected.
 	if !c.IsRace() {
 		a := c.Aggregate(s)
-		if html == "" {
+		switch {
+		case html != "":
+			return toHTML(a, html, needsEnv)
+		case json != "":
+			return toJSON(a, json)
+		default:
 			return writeBucketsToConsole(out, p, a, pf, needsEnv, filter, match)
 		}
-		return toHTML(a, html, needsEnv)
 	}
 	// It's a data race.
 	if html == "" {
@@ -146,7 +174,7 @@ func processInner(out io.Writer, p *Palette, s stack.Similarity, pf pathFormat, 
 // process copies stdin to stdout and processes any "panic: " line found.
 //
 // If html is used, a stack trace is written to this file instead.
-func process(in io.Reader, out io.Writer, p *Palette, s stack.Similarity, pf pathFormat, parse, rebase bool, html string, filter, match *regexp.Regexp) error {
+func process(in io.Reader, out io.Writer, p *Palette, s stack.Similarity, pf pathFormat, parse, rebase bool, html, json string, filter, match *regexp.Regexp, readJSON bool) error {
 	opts := stack.DefaultOpts()
 	if !rebase {
 		opts.GuessPaths = false
@@ -155,11 +183,18 @@ func process(in io.Reader, out io.Writer, p *Palette, s stack.Similarity, pf pat
 	if !parse {
 		opts.AnalyzeSources = false
 	}
+	if readJSON {
+		a, err := fromJSON(in)
+		if err != nil {
+			return err
+		}
+		return writeBucketsToConsole(out, p, a, pf, false, filter, match)
+	}
 	for first := true; ; first = false {
 		c, suffix, err := stack.ScanSnapshot(in, out, opts)
 		if c != nil {
 			// Process it even if an error occurred.
-			if err1 := processInner(out, p, s, pf, html, filter, match, c, first); err == nil {
+			if err1 := processInner(out, p, s, pf, html, json, filter, match, c, first); err == nil {
 				err = err1
 			}
 		}
@@ -203,6 +238,8 @@ func Main() error {
 	forceColor := flag.Bool("force-color", false, "Forcibly enable coloring when with stdout is redirected")
 	// HTML only.
 	html := flag.String("html", "", "Output an HTML file")
+	json := flag.String("json-out", "", "Output a JSON file")
+	readJSON := flag.Bool("read-json", false, "Interpret input as a JSON file")
 
 	var out io.Writer = os.Stdout
 	p := &defaultPalette
@@ -310,5 +347,5 @@ func Main() error {
 		pf = relPath
 		*rebase = true
 	}
-	return process(in, out, p, s, pf, *parse, *rebase, *html, filter, match)
+	return process(in, out, p, s, pf, *parse, *rebase, *html, *json, filter, match, *readJSON)
 }
