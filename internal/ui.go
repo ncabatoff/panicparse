@@ -170,8 +170,13 @@ func (p *Palette) BucketHeader(b *stack.Bucket, pf pathFormat, multipleBuckets b
 	if c := pf.createdByString(&b.Signature); c != "" {
 		extra += p.CreatedBy + " [Created by " + c + "]"
 	}
+	comment := ""
+	if b.Signature.Comment != "" {
+		comment = fmt.Sprintf("%s// %s\n%s", p.CreatedBy, b.Signature.Comment, p.EOLReset)
+	}
 	return fmt.Sprintf(
-		"%s%d: %s%s%s\n",
+		"%s%s%d: %s%s%s\n",
+		comment,
 		p.routineColor(b.First, multipleBuckets), len(b.IDs),
 		b.State, extra,
 		p.EOLReset)

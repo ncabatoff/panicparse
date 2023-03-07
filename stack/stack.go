@@ -634,6 +634,7 @@ func (s *Stack) updateLocations(goroot, localgoroot string, localgomods, gopaths
 // it's state, if it is thread locked, which call site created this goroutine,
 // etc.
 type Signature struct {
+	Comment string
 	// State is the goroutine state at the time of the snapshot.
 	//
 	// Use git grep 'gopark(|unlock)\(' to find them all plus everything listed
